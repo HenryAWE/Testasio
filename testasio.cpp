@@ -15,15 +15,23 @@ int client_main(const std::string& addr, unsigned short port)
         asio::ip::port_type;
         asio::ip::tcp::endpoint ep(asio::ip::address_v4::from_string(addr), port);
         asio::ip::tcp::socket sock(service);
-        sock.connect(ep);
-        
+        boost::system::error_code ec;
+        sock.connect(ep, ec);
+        if(ec == asio::error::connection_refused)
+        {
+            std::cout << "Connection refused! Please make sure that the server application is running" << std::endl;
+            return 0;
+        }
+        else if(ec)
+            throw boost::system::system_error(ec);
+
         std::cout << "Connect to server " << addr << " on port " << port << std::endl;
 
         std::string in;
         while(true)
         {
             std::cout << "SEND: ";
-            if(!(std::cin >> in))
+            if(!std::getline(std::cin, in))
                 break;
             boost::system::error_code ec;
             sock.write_some(boost::asio::buffer(in), ec);
@@ -57,16 +65,33 @@ int server_main(unsigned short port)
         std::cout << "Starting server on port " << port << std::endl;
         asio::ip::tcp::acceptor acc(service, ep);
         asio::ip::tcp::socket sock(service);
+    begin_acc:
         acc.accept(sock);
+        std::cout
+            << "Accept client from " << sock.remote_endpoint().address().to_string()
+            << " on port " << sock.remote_endpoint().port()
+            << std::endl;
 
         char buf[512];
         while(true)
         {
-            auto len = sock.read_some(asio::buffer(buf));
+            boost::system::error_code ec;
+            auto len = sock.read_some(asio::buffer(buf), ec);
+            if(ec == boost::asio::error::eof)
+            {
+                std::cout << "Client closed" << std::endl;
+                sock.close();
+                goto begin_acc;
+            }
+            else if(ec)
+            {
+                throw boost::system::system_error(ec);
+            }
             std::string_view view(buf, len);
             std::cout << "RECV: " << view << std::endl;
             if(view == "quit")
             {
+                sock.close();
                 std::cout << "Quitting" << std::endl;
                 return 0;
             }
